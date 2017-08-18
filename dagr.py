@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
 
-import multiprocessing
-import subprocess
-import sys
-import threading
-import time
-import traceback
-
 ####################
 # Helpers
 
@@ -45,6 +38,14 @@ DAGR_FILENAME = '.dagr'
 with open(DAGR_FILENAME) as f:
     code = compile(f.read(), DAGR_FILENAME, 'exec')
     exec(code)
+
+####################
+# Now include
+
+import multiprocessing
+import subprocess
+import sys
+import threading
 
 ####################
 # Privates
