@@ -298,8 +298,12 @@ def run_dagr(roots, thread_count=multiprocessing.cpu_count()):
 
 if __name__ == '__main__':
     args = sys.argv[1:]
-    while args:
-        cur = args.pop(0)
+    while True:
+        try:
+            cur = args.pop(0)
+        except IndexError:
+            break
+
         if cur == '--dump':
             SubprocCallNode.ECHO = True
             continue
