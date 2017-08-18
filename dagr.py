@@ -1,4 +1,4 @@
-#!/usr/bin/env python2.7
+#!/usr/bin/env python3
 
 import multiprocessing
 import subprocess
@@ -18,7 +18,7 @@ class DagrPattern(object):
         return self.args + suffix
 
     def map(self, from_list):
-        return map(lambda x: self.apply([x]), from_list)
+        return list(map(lambda x: self.apply([x]), from_list))
 
 ####################
 # Node
@@ -41,7 +41,10 @@ class DagrNode(object):
 ####################
 # Traverse!
 
-execfile('.dagr')
+DAGR_FILENAME = '.dagr'
+with open(DAGR_FILENAME) as f:
+    code = compile(f.read(), DAGR_FILENAME, 'exec')
+    exec(code)
 
 ####################
 # Privates
@@ -204,14 +207,20 @@ class SubprocCallNode(PromiseGraphNode):
         try:
             p = subprocess.Popen(self.call_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             (stdout, stderr) = p.communicate()
-            sys.stdout.write(stdout)
-            sys.stderr.write(stderr)
+            stdout = stdout.decode(errors='replace')
+            stderr = stderr.decode(errors='replace')
+
             if p.returncode == 0:
                 result = True
+            else:
+                stderr += '\nFAILED: {}\n'.format(self.call_args)
+
+            sys.stdout.write(stdout)
+            sys.stderr.write(stderr)
         except OSError:
-            sys.stderr.write('Binary not found: ' + self.call_args[0])
+            sys.stderr.write('Binary not found: {}\n'.format(self.call_args[0]))
         except subprocess.CalledProcessError:
-            sys.stderr.write('Error running: {}'.format(self.call_args))
+            sys.stderr.write('Error running: {}\n'.format(self.call_args))
         self.resolve(result)
 
 ####################
@@ -281,7 +290,7 @@ if __name__ == '__main__':
 
     #print threading.enumerate()
     if success:
-        print 'SUCCEEDED'
+        print('SUCCEEDED')
     else:
-        print 'FAILED'
+        print('FAILED')
     exit(int(not success))
