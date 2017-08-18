@@ -152,7 +152,7 @@ def map_dag(roots, map_func):
 
 class PromiseGraphNode(object):
     def __init__(self, parents, info=''):
-        self.info = info
+        self.info = str(info)
         #print 'PromiseGraphNode {}: '.format(self.info) + ', '.join(map(lambda x: x.info, parents))
         self.lock = threading.Lock()
         self.pending_parents = set(parents)
@@ -197,7 +197,7 @@ class SubprocCallNode(PromiseGraphNode):
     def __init__(self, parents, info, pool, call_args):
         PromiseGraphNode.__init__(self, parents, info)
         self.pool = pool
-        self.call_args = call_args
+        self.call_args = list(call_args)
 
     def run(self):
         self.pool.enqueue(Task(self.task_run))
@@ -272,6 +272,7 @@ def run_dagr(roots, thread_count=multiprocessing.cpu_count()):
     terminal_root.event.wait()
     pool.kill()
     return terminal_root.result
+
 
 if __name__ == '__main__':
     root_names = ['DEFAULT']
