@@ -233,15 +233,15 @@ class SubprocCallNode(PromiseGraphNode):
 
             if p.returncode == 0:
                 result = True
-            else:
-                stderr += '\nFAILED: {}\n'.format(self.call_args)
-
-            sys.stdout.write(stdout)
-            sys.stderr.write(stderr)
         except OSError:
-            sys.stderr.write('Binary not found: {}\n'.format(self.call_args[0]))
-        except subprocess.CalledProcessError:
-            sys.stderr.write('Error running: {}\n'.format(self.call_args))
+            stdout = ''
+            stderr = 'Binary not found: {}'.format(self.call_args[0])
+
+        if not result:
+            stderr += '\nFAILED: {}\n'.format(self.call_args)
+        sys.stdout.write(stdout)
+        sys.stderr.write(stderr)
+
         self.resolve(result)
 
 ####################
