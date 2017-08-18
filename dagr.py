@@ -297,9 +297,9 @@ if __name__ == '__main__':
     success = run_dagr(roots)
 
     if success:
-        sys.stderr.write('SUCCEEDED\n')
+        sys.stderr.write('BUILD SUCCEEDED\n')
     else:
-        sys.stderr.write('FAILED\n')
+        sys.stderr.write('BUILD FAILED\n')
 
     assert len(threading.enumerate()) == 1, str(threading.enumerate())
     exit(int(not success))
