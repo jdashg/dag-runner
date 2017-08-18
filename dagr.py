@@ -43,6 +43,7 @@ with open(DAGR_FILENAME) as f:
 # Now include
 
 import multiprocessing
+import shlex
 import subprocess
 import sys
 import threading
@@ -200,7 +201,14 @@ class PromiseGraphNode(object):
 
 ####################
 
+def quote_args(args):
+    if os.name == 'nt':
+        return subprocess.list2cmdline(args)
+    return shlex.quote(args)
+
+
 class SubprocCallNode(PromiseGraphNode):
+    ECHO = False
     def __init__(self, parents, info, pool, call_args):
         PromiseGraphNode.__init__(self, parents, info)
         self.pool = pool
@@ -210,6 +218,12 @@ class SubprocCallNode(PromiseGraphNode):
         self.pool.enqueue(Task(self.task_run))
 
     def task_run(self):
+        if SubprocCallNode.ECHO:
+            quoted = quote_args(self.call_args)
+            sys.stdout.write(quoted + '\n')
+            self.resolve(True)
+            return
+
         result = False
         try:
             p = subprocess.Popen(self.call_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -283,16 +297,27 @@ def run_dagr(roots, thread_count=multiprocessing.cpu_count()):
 
 
 if __name__ == '__main__':
-    root_names = ['DEFAULT']
-    if len(sys.argv) > 1:
-        root_names = sys.argv[1:].split(' ')
+    args = sys.argv[1:]
+    while args:
+        cur = args.pop(0)
+        if cur == '--dump':
+            SubprocCallNode.ECHO = True
+            continue
+        if cur == '--':
+            break
+        args.insert(0, cur)
+        break
+
+    root_names = args
+    if not root_names:
+        root_names = ['DEFAULT']
 
     roots = []
     for x in root_names:
         try:
             roots.append(DagrNode.nodes_by_name[x])
         except KeyError:
-            print >>sys.stderr, 'No such node: {}'.format(x)
+            sys.stderr.write('No such DagrNode: {}\n'.format(x))
             exit(1)
 
     success = run_dagr(roots)
