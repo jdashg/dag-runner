@@ -14,11 +14,11 @@ class DagrPattern(object):
     def __init__(self, args):
         self.args = args
 
-    def apply(self, suffix):
+    def concat(self, suffix):
         return self.args + suffix
 
     def map(self, from_list):
-        return list(map(lambda x: self.apply([x]), from_list))
+        return list(map(lambda x: self.concat([x]), from_list))
 
 ####################
 # Node
@@ -66,9 +66,11 @@ class ThreadPool(object):
         self.is_alive = True
         self.task_queue = []
 
+        self.threads = set()
         for i in range(num_threads):
             t_name = '{}[{}]'.format(self.name, i)
             t = threading.Thread(name=t_name, target=self.thread, args=(i,))
+            self.threads.add(t)
             t.start()
 
 
@@ -95,6 +97,10 @@ class ThreadPool(object):
         self.is_alive = False
         with self.cond:
             self.cond.notify_all()
+
+    def join(self):
+        for t in self.threads:
+            t.join()
 
 ####################
 
@@ -271,6 +277,7 @@ def run_dagr(roots, thread_count=multiprocessing.cpu_count()):
 
     terminal_root.event.wait()
     pool.kill()
+    pool.join()
     return terminal_root.result
 
 
@@ -289,9 +296,10 @@ if __name__ == '__main__':
 
     success = run_dagr(roots)
 
-    #print threading.enumerate()
     if success:
-        print('SUCCEEDED')
+        sys.stderr.write('SUCCEEDED\n')
     else:
-        print('FAILED')
+        sys.stderr.write('FAILED\n')
+
+    assert len(threading.enumerate()) == 1, str(threading.enumerate())
     exit(int(not success))
