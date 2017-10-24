@@ -1,19 +1,6 @@
 #!/usr/bin/env python3
 
 ####################
-# Helpers
-
-class DagrPattern(object):
-    def __init__(self, args):
-        self.args = args
-
-    def concat(self, suffix):
-        return self.args + suffix
-
-    def map(self, from_list):
-        return list(map(lambda x: self.concat([x]), from_list))
-
-####################
 # Node
 
 class DagrNode(object):
@@ -47,6 +34,7 @@ import shlex
 import subprocess
 import sys
 import threading
+import time
 
 ####################
 # Privates
@@ -193,7 +181,10 @@ class PromiseGraphNode(object):
         else:
             for child in self.children:
                 with child.lock:
-                    child.pending_parents.remove(self)
+                    try:
+                        child.pending_parents.remove(self)
+                    except KeyError:
+                        continue
                     if child.pending_parents:
                         continue
                 assert child.result == None
@@ -209,24 +200,28 @@ def quote_args(args):
 
 class SubprocCallNode(PromiseGraphNode):
     ECHO = False
-    def __init__(self, parents, info, pool, call_args):
+    def __init__(self, parents, info, pool, call):
         PromiseGraphNode.__init__(self, parents, info)
         self.pool = pool
-        self.call_args = list(call_args)
+        self.call = call
 
     def run(self):
         self.pool.enqueue(Task(self.task_run))
 
     def task_run(self):
+        shell = type(self.call) is str
+
         if SubprocCallNode.ECHO:
-            quoted = quote_args(self.call_args)
-            sys.stdout.write(quoted + '\n')
+            call = self.call
+            if not shell:
+                call = quote_args(call)
+            sys.stdout.write(call + '\n')
             self.resolve(True)
             return
 
         result = False
         try:
-            p = subprocess.Popen(self.call_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            p = subprocess.Popen(self.call, shell=shell, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             (stdout, stderr) = p.communicate()
             stdout = stdout.decode(errors='replace')
             stderr = stderr.decode(errors='replace')
@@ -235,10 +230,10 @@ class SubprocCallNode(PromiseGraphNode):
                 result = True
         except OSError:
             stdout = ''
-            stderr = 'Binary not found: {}'.format(self.call_args[0])
+            stderr = 'Binary not found: {}'.format(self.call[0])
 
         if not result:
-            stderr += '\nFAILED: {}\n'.format(self.call_args)
+            stderr += '\n{} FAILED: {}\n'.format(self.info, self.call)
         sys.stdout.write(stdout)
         sys.stderr.write(stderr)
 
@@ -256,7 +251,10 @@ class EventNode(PromiseGraphNode):
 
 ####################
 
-def run_dagr(roots, thread_count=multiprocessing.cpu_count()):
+NUM_THREADS = multiprocessing.cpu_count()
+#NUM_THREADS = 1
+
+def run_dagr(roots, thread_count=NUM_THREADS):
     pool = ThreadPool('run_dagr pool', thread_count)
 
     mapped_leaves = set()
@@ -297,6 +295,7 @@ def run_dagr(roots, thread_count=multiprocessing.cpu_count()):
 
 
 if __name__ == '__main__':
+    start_time = time.time()
     args = sys.argv[1:]
     while True:
         try:
@@ -326,10 +325,11 @@ if __name__ == '__main__':
 
     success = run_dagr(roots)
 
+    elapsed_time = time.time() - start_time
     if success:
-        sys.stderr.write('BUILD SUCCEEDED\n')
+        sys.stderr.write('BUILD SUCCEEDED (in {:.4}s)\n'.format(elapsed_time))
     else:
-        sys.stderr.write('BUILD FAILED\n')
+        sys.stderr.write('BUILD FAILED\n\n\n')
 
     assert len(threading.enumerate()) == 1, str(threading.enumerate())
     exit(int(not success))
