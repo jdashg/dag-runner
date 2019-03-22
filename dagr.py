@@ -7,39 +7,58 @@ assert __name__ == '__main__'
 
 class dagr(object):
     class Node(object):
-        BY_NAME = dict()
-
-        def __init__(self, deps, cmd=[], name=None):
+        def __init__(self, deps, cmd=[]):
+            for x in deps:
+                assert(x)
             self.deps = set(deps)
             self.cmd = cmd
-            self.name = name
-
-            if self.name:
-                assert self.name not in Node.BY_NAME
-                Node.BY_NAME[self.name] = self
 
 
         def __str__(self):
-            ret = '<>'.format(self.cmd)
-            if self.name:
-                ret = '{} {}'.format(self.name, ret)
-            return ret
+            return '<>'.format(self.cmd)
 
 
         def then(self, cmd):
-            return Node([self], cmd)
+            return dagr.Node([self], cmd)
+
+
+    class Target(Node):
+        BY_NAME = dict()
+
+        def __init__(self, name, *a, **k):
+            super().__init__(*a, **k)
+            self.name = name
+
+            assert self.name not in dagr.Target.BY_NAME
+            dagr.Target.BY_NAME[self.name] = self
+
+
+        def __str__(self):
+            return '{}{}'.format(self.name, super().__str__())
 
 
     @staticmethod
-    def include(path):
-        with open(path) as f:
-            code = compile(f.read(), path, 'exec')
-            exec(code)
+    def include(path, base_path=None):
+        if not base_path:
+            base_path = pathlib.Path(__file__).parent
+        path = base_path / path
+        try:
+            data = path.read_bytes()
+        except IOError:
+            path = path / '.dagr'
+            data = path.read_bytes()
+        code = compile(data, str(path), 'exec')
+        g = globals()
+        was = g['__file__']
+        g['__file__'] = path.as_posix()
+        exec(code, g)
+        g['__file__'] = was
 
 ####################
 # Traverse from the root file
 
-dagr.include('.dagr')
+import pathlib
+dagr.include('.dagr', pathlib.Path.cwd())
 
 ####################
 # Now include
@@ -62,13 +81,15 @@ class ExStackHasCycle(Exception):
 
 def MapDag(roots, fn_nexts, fn_map):
     stack = []
-    visited = set()
+    visited = dict()
     def recurse(cur):
+        print('cur', str(cur))
         if cur in stack:
             raise ExStackHasCycle(stack + [cur])
-        if cur in visited:
-            continue
-        visited.add(cur)
+        try:
+            return visited[cur]
+        except KeyError:
+            pass
 
         nexts = fn_nexts(cur)
 
@@ -76,25 +97,26 @@ def MapDag(roots, fn_nexts, fn_map):
         mapped_nexts = [recurse(x) for x in nexts]
         stack.pop()
 
-        return fn_map(cur, mapped_nexts)
+        ret = fn_map(cur, mapped_nexts)
+        visited[cur] = ret
+        return ret
 
     return [recurse(x) for x in roots]
 
 # -
 
 NUM_THREADS = os.cpu_count()
-#NUM_THREADS = 1
-
-RETURN_WHEN = futures.ALL_COMPLETED
-ECHO = False
-
-# -
+KEEP_GOING = False
+VERBOSE = False
+DRY_RUN = False
 
 def run_node(cur):
     is_shell = type(cur.cmd) is str
 
-    if ECHO:
+    if VERBOSE:
         sys.stderr.write(str(cur))
+
+    if DRY_RUN:
         return
 
     p = subprocess.run(cur.cmd, shell=is_shell, capture_output=True, check=True)
@@ -104,9 +126,14 @@ def run_node(cur):
 
 # -
 
-def run_dag(roots, thread_count=NUM_THREADS, return_when=RETURN_WHEN):
-    with futures.ThreadPoolExecutor(thread_count, 'dagr') as pool:
+def run_dag(roots):
+    return_when = futures.FIRST_EXCEPTION
+    if KEEP_GOING:
+        return_when = futures.ALL_COMPLETED
+
+    with futures.ThreadPoolExecutor(NUM_THREADS, 'dagr') as pool:
         def fn_nexts(cur):
+            print(cur.cmd)
             return cur.deps
 
         def wait_and_run(cur, mapped_nexts):
@@ -129,11 +156,18 @@ while True:
     except IndexError:
         break
 
-    if cur == '--dump':
-        ECHO = True
-        continue
     if cur == '--':
         break
+    if cur.startswith('-j'):
+        NUM_THREADS = int(cur[2:])
+        continue
+    if cur == '-v':
+        VERBOSE = True
+        continue
+    if cur == '--dry':
+        DRY_RUN = True
+        continue
+
     args.insert(0, cur)
     break
 
@@ -142,20 +176,22 @@ while True:
 root_names = args
 if not root_names:
     root_names = ['DEFAULT']
+print('root_names', root_names)
 
 roots = []
 for x in root_names:
     try:
-        roots.append(dagr.Node.BY_NAME[x])
+        roots.append(dagr.Target.BY_NAME[x])
     except KeyError:
         sys.stderr.write('No such node: {}\n'.format(x))
         exit(1)
 
+print('roots', roots)
 # -
 
 try:
-    run_dagr(roots)
-except e:
+    run_dag(roots)
+except Exception as e:
     sys.stdout.write('BUILD FAILED:\n\n\n')
     raise e
 
