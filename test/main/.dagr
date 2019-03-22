@@ -3,4 +3,5 @@ parallel = None
 dagr.include('serial')
 dagr.include('../parallel')
 
-dagr.Target('DEFAULT', [serial, parallel])
+import sys
+dagr.Target('DEFAULT', [dagr.Node([serial, parallel], [sys.executable, 'check_test.py'])])

@@ -6,20 +6,49 @@ assert __name__ == '__main__'
 # dagr pseudo-module
 
 class dagr(object):
+    VERBOSE = False
+    DRY_RUN = False
+
     class Node(object):
         def __init__(self, deps, cmd=[]):
+            import os
             for x in deps:
                 assert(x)
             self.deps = set(deps)
             self.cmd = cmd
+            self.cwd = os.getcwd()
 
 
         def __str__(self):
-            return '<>'.format(self.cmd)
+            return f'<{self.cmd}>'
 
 
         def then(self, cmd):
             return dagr.Node([self], cmd)
+
+
+        def run(self):
+            is_shell = type(self.cmd) is str
+
+            if dagr.VERBOSE:
+                sys.stderr.write(f'{self}\n')
+
+            if dagr.DRY_RUN:
+                if self.cmd:
+                    if is_shell:
+                        line = self.cmd
+                    else:
+                        line = ' '.join((shlex.quote(x) for x in self.cmd))
+                    sys.stdout.write(f'{line}\n')
+                return
+
+            if self.cmd:
+                p = subprocess.run(self.cmd, shell=is_shell, cwd=self.cwd, capture_output=True)
+                sys.stdout.buffer.write(p.stdout)
+                sys.stderr.buffer.write(p.stderr)
+                if p.returncode:
+                    raise Exception(f'Cmd `{self.cmd}` failed.')
+            return
 
 
     class Target(Node):
@@ -34,40 +63,44 @@ class dagr(object):
 
 
         def __str__(self):
-            return '{}{}'.format(self.name, super().__str__())
+            return f'{self.name}{super().__str__()}'
 
 
     @staticmethod
-    def include(path, base_path=None):
-        if not base_path:
-            base_path = pathlib.Path(__file__).parent
-        path = base_path / path
-        try:
-            data = path.read_bytes()
-        except IOError:
+    def include(path):
+        import os
+        path = pathlib.Path(path)
+        if path.is_dir():
             path = path / '.dagr'
-            data = path.read_bytes()
+
+        data = path.read_bytes()
+
         code = compile(data, str(path), 'exec')
-        g = globals()
-        was = g['__file__']
-        g['__file__'] = path.as_posix()
-        exec(code, g)
-        g['__file__'] = was
+
+        pushd = pathlib.Path.cwd()
+        os.chdir(path.parent)
+        exec(code, globals())
+        os.chdir(pushd)
 
 ####################
 # Traverse from the root file
 
 import pathlib
-dagr.include('.dagr', pathlib.Path.cwd())
+dagr.include('.dagr')
 
 ####################
 # Now include
 
 from concurrent import futures
 import os
+import shlex
 import subprocess
 import sys
 import time
+
+py_version = sys.version_info[:2]
+# Require subprocess.run(capture_output=)
+assert py_version >= (3, 7), py_version
 
 ####################
 # Privates
@@ -83,7 +116,6 @@ def MapDag(roots, fn_nexts, fn_map):
     stack = []
     visited = dict()
     def recurse(cur):
-        print('cur', str(cur))
         if cur in stack:
             raise ExStackHasCycle(stack + [cur])
         try:
@@ -105,24 +137,8 @@ def MapDag(roots, fn_nexts, fn_map):
 
 # -
 
-NUM_THREADS = os.cpu_count()
 KEEP_GOING = False
-VERBOSE = False
-DRY_RUN = False
-
-def run_node(cur):
-    is_shell = type(cur.cmd) is str
-
-    if VERBOSE:
-        sys.stderr.write(str(cur))
-
-    if DRY_RUN:
-        return
-
-    p = subprocess.run(cur.cmd, shell=is_shell, capture_output=True, check=True)
-    sys.stdout.buffer.write(p.stdout)
-    sys.stderr.buffer.write(p.stderr)
-    return
+NUM_THREADS = os.cpu_count()
 
 # -
 
@@ -131,20 +147,33 @@ def run_dag(roots):
     if KEEP_GOING:
         return_when = futures.ALL_COMPLETED
 
+    def wait_for(fs):
+        (done, not_done) = futures.wait(fs, return_when=return_when)
+        if not KEEP_GOING:
+            for f in not_done:
+                f.cancel()
+        for f in done:
+            e = f.exception()
+            if e:
+                raise e
+
+    def wait_and_run(cur, mapped_nexts):
+        #print(f'wait_and_run({cur})')
+        wait_for(mapped_nexts)
+        cur.run()
+
     with futures.ThreadPoolExecutor(NUM_THREADS, 'dagr') as pool:
+
         def fn_nexts(cur):
-            print(cur.cmd)
+            #print(f'fn_nexts({cur})')
             return cur.deps
 
-        def wait_and_run(cur, mapped_nexts):
-            futures.wait(mapped_nexts, return_when=return_when)
-            run_node(cur)
-
         def fn_map(cur, mapped_nexts):
-            return pool.submit(wait_and_run, [cur, mapped_nexts])
+            #print(f'fn_map({cur}, {mapped_nexts})')
+            return pool.submit(wait_and_run, cur, mapped_nexts)
 
         root_futures = MapDag(roots, fn_nexts, fn_map)
-        futures.wait(root_futures, return_when=return_when)
+        wait_for(root_futures)
 
 # -
 
@@ -162,10 +191,10 @@ while True:
         NUM_THREADS = int(cur[2:])
         continue
     if cur == '-v':
-        VERBOSE = True
+        dagr.VERBOSE = True
         continue
     if cur == '--dry':
-        DRY_RUN = True
+        dagr.DRY_RUN = True
         continue
 
     args.insert(0, cur)
@@ -176,7 +205,7 @@ while True:
 root_names = args
 if not root_names:
     root_names = ['DEFAULT']
-print('root_names', root_names)
+sys.stderr.write(f'Building: {root_names}\n')
 
 roots = []
 for x in root_names:
@@ -186,14 +215,17 @@ for x in root_names:
         sys.stderr.write('No such node: {}\n'.format(x))
         exit(1)
 
-print('roots', roots)
 # -
 
 try:
     run_dag(roots)
 except Exception as e:
-    sys.stdout.write('BUILD FAILED:\n\n\n')
+    sys.stderr.flush()
+    sys.stdout.flush()
+    sys.stdout.write('\nBUILD FAILED:\n')
     raise e
 
 elapsed_time = time.time() - start_time
-sys.stdout.write('BUILD SUCCEEDED (in {:.4}s)\n'.format(elapsed_time))
+sys.stderr.flush()
+sys.stdout.flush()
+sys.stderr.write('\nBUILD SUCCEEDED ({:.3f}s)\n'.format(elapsed_time))

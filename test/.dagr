@@ -1,2 +1,7 @@
+import os
+try:
+  os.mkdir('out')
+except FileExistsError:
+  pass
 
 dagr.include('.dagr2')
