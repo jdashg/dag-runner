@@ -1,0 +1,2 @@
+deps = [dagr.Node([], 'echo 1 > ../out/parallel.{}.txt'.format(i)) for i in range(3)]
+parallel = dagr.Node(deps, 'ls ../out/parallel.*.txt | xargs cat > ../out/parallel.txt')

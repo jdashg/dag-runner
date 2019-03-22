@@ -1,0 +1,7 @@
+serial = dagr.Node([])
+i = 1
+serial = serial.then('echo {} > ../../out/serial.txt'.format(i))
+i += 1
+serial = serial.then('echo {} > ../../out/serial.txt'.format(i))
+i += 1
+serial = serial.then('echo {} > ../../out/serial.txt'.format(i))

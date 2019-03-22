@@ -1,0 +1,6 @@
+serial = None
+parallel = None
+dagr.include('serial')
+dagr.include('../parallel')
+
+dagr.Target('DEFAULT', [serial, parallel])
